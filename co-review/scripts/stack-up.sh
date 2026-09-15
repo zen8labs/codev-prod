@@ -7,7 +7,13 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${ENV_FILE:-$ROOT_DIR/.env}"
 LOG_FILE="${STACK_INIT_LOG:-$ROOT_DIR/logs/stack-init.log}"
 OPENHANDS_DIR="${OPENHANDS_DIR:-$(cd "$ROOT_DIR/.." && pwd)/Open-Hand}"
-COMPOSE_FILE="${COMPOSE_FILE:-$ROOT_DIR/docker-compose.yml}"
+if [[ -z "${COMPOSE_FILE:-}" ]]; then
+  if [[ -f "$ROOT_DIR/docker-compose.yml" ]]; then
+    COMPOSE_FILE="$ROOT_DIR/docker-compose.yml"
+  else
+    COMPOSE_FILE="$ROOT_DIR/docker-compose.prod.yml"
+  fi
+fi
 
 WITH_DEVLAKE=1
 WITH_EXTERNAL_AGENT=0

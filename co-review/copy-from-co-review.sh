@@ -21,7 +21,6 @@ fi
 
 mkdir -p "$DEST/scripts"
 
-cp "$SRC/docker-compose.prod.yml" "$DEST/docker-compose.yml"
 cp "$SRC/docker-compose.prod.yml" "$DEST/docker-compose.prod.yml"
 cp "$SRC/.env.example" "$DEST/.env.example"
 cp "$SRC/scripts/stack-up.sh" "$DEST/scripts/stack-up.sh"
