@@ -403,7 +403,7 @@ services:
           "-q",
           "-O",
           "/dev/null",
-          "http://127.0.0.1:3000${NEXT_PUBLIC_BASE_PATH:-}/health",
+          "http://127.0.0.1:3000${NEXT_PUBLIC_BASE_PATH:-}/api/health",
         ]
       interval: 10s
       timeout: 5s

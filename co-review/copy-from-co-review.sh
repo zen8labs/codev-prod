@@ -2,13 +2,17 @@
 # Run this on your laptop (next to a co-review checkout). Copies deploy files
 # into this folder. Zip the folder yourself afterward.
 #
-#   cd co-review-prod
+#   cd codev-prod/co-review
 #   ./copy-from-co-review.sh
 #   # optional: CO_REVIEW_DIR=/path/to/co-review ./copy-from-co-review.sh
 set -euo pipefail
 
-DEST="$(cd "$(dirname "${BASH_SOURCE[0]}") && pwd)"
-SRC="${CO_REVIEW_DIR:-$DEST/../co-review}"
+DEST="$(cd "$(dirname "$0")" && pwd)"
+if [[ -n "${CO_REVIEW_DIR:-}" ]]; then
+  SRC="$CO_REVIEW_DIR"
+else
+  SRC="$(cd "$DEST/../.." && pwd)/co-review"
+fi
 
 if [[ ! -f "$SRC/docker-compose.prod.yml" ]]; then
   echo "co-review not found at $SRC (set CO_REVIEW_DIR)" >&2
