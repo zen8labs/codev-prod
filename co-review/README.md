@@ -7,7 +7,6 @@ This README is the **operator runbook**: commands on a machine that has the repo
 The Compose file in this folder is `docker-compose.prod.yml` from the repo. `stack-up.sh` uses it when `docker-compose.yml` is not present.
 
 Should replace `REGISTRY=tuzaku95` with your own Docker Hub username (`tuzaku95` is my username).
----
 
 ## 1. Machine that contains the repo
 
@@ -86,14 +85,14 @@ If host port 3000 is taken, set `CO_REVIEW_DASHBOARD_PORT` in `.env`. Compose he
 
 `NEXT_PUBLIC_BASE_PATH` is **not** enough in `.env` alone. Next.js `basePath` is fixed when the **dashboard image is built**. Runtime env must match that bake, and SSO/nginx must use the same path.
 
-| Place | What to set |
-| --- | --- |
-| Image build | `NEXT_PUBLIC_BASE_PATH=/co-review` on `docker-buildx-co-review.sh dashboard` (see §1.2) |
-| `.env` (same value) | `NEXT_PUBLIC_BASE_PATH=/co-review` |
-| `.env` | `DASHBOARD_PUBLIC_BASE_URL=https://your.public.host` — **origin only**, no `/co-review` |
-| SSO IdP | `redirect_uri` = `{DASHBOARD_PUBLIC_BASE_URL}/co-review/auth/sso/callback` |
-| Browser | Open `{origin}/co-review/` (not `{origin}/` if basePath is set) |
-| nginx | `location /co-review/` must `proxy_pass` to the dashboard **keeping** `/co-review` on the upstream (Next serves that prefix) |
+| Place               | What to set                                                                                                                  |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Image build         | `NEXT_PUBLIC_BASE_PATH=/co-review` on `docker-buildx-co-review.sh dashboard` (see §1.2)                                      |
+| `.env` (same value) | `NEXT_PUBLIC_BASE_PATH=/co-review`                                                                                           |
+| `.env`              | `DASHBOARD_PUBLIC_BASE_URL=https://your.public.host` — **origin only**, no `/co-review`                                      |
+| SSO IdP             | `redirect_uri` = `{DASHBOARD_PUBLIC_BASE_URL}/co-review/auth/sso/callback`                                                   |
+| Browser             | Open `{origin}/co-review/` (not `{origin}/` if basePath is set)                                                              |
+| nginx               | `location /co-review/` must `proxy_pass` to the dashboard **keeping** `/co-review` on the upstream (Next serves that prefix) |
 
 If you built the image **without** the build-arg, the app lives at `/`. Putting `/co-review` only in `.env` makes SSO `redirect_uri` include `/co-review` while Next still serves `/auth/sso/callback` — login breaks. Rebuild the dashboard with the build-arg, or clear `NEXT_PUBLIC_BASE_PATH` and use the site root.
 
