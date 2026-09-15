@@ -1,0 +1,47 @@
+# Production Compose — pull the published Open-Hand app image; do not clone source.
+#
+# SDK source is NOT a runtime service. It is baked into this image at build
+# (see containers/app/Dockerfile.local). At runtime the app pulls the
+# agent-server sandbox image (GHCR), which you also do not push from this repo.
+#
+# Deploy bundle on the server:
+#   docker-compose.prod.yml  (or copy as docker-compose.yml)
+#   .env
+#
+# Run:
+#   docker compose -f docker-compose.prod.yml --env-file .env pull
+#   docker compose -f docker-compose.prod.yml --env-file .env up -d
+#
+# Default SANDBOX_HOST_PORT=3005 so it does not collide with Co-review dashboard :3000.
+
+services:
+  openhands:
+    image: ${OPENHANDS_REGISTRY:-baotq4}/vtnet-openhands:${OPENHANDS_IMAGE_TAG:-0.1.2}
+    pull_policy: always
+    container_name: openhands-app
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      AGENT_SERVER_IMAGE_REPOSITORY: ${AGENT_SERVER_IMAGE_REPOSITORY:-ghcr.io/oadtq/agent-server}
+      AGENT_SERVER_IMAGE_TAG: ${AGENT_SERVER_IMAGE_TAG:-1.28.0-z8l.2-python}
+      WORKSPACE_MOUNT_PATH: ${WORKSPACE_MOUNT_PATH:-${PWD}/workspace}
+      SANDBOX_HOST_PORT: ${SANDBOX_HOST_PORT:-3005}
+      SANDBOX_STARTUP_GRACE_SECONDS: ${SANDBOX_STARTUP_GRACE_SECONDS:-60}
+    ports:
+      - "${SANDBOX_HOST_PORT:-3005}:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - openhands_data:/.z8l-agent
+      - ${WORKSPACE_BASE:-./workspace}:/opt/workspace_base
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 90s
+
+volumes:
+  openhands_data:
