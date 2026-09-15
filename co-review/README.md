@@ -6,6 +6,7 @@ This README is the **operator runbook**: commands on a machine that has the repo
 
 The Compose file in this folder is `docker-compose.prod.yml` from the repo. `stack-up.sh` uses it when `docker-compose.yml` is not present.
 
+Should replace `REGISTRY=tuzaku95` with your own Docker Hub username (`tuzaku95` is my username).
 ---
 
 ## 1. Machine that contains the repo
@@ -26,11 +27,13 @@ Fill or keep `.env` (`COREVIEW_REGISTRY`, `COREVIEW_IMAGE_TAG`, SSO, DB, encrypt
 
 From the **co-review repo root** (not this folder). Log in to Docker Hub first. `REGISTRY` must match `COREVIEW_REGISTRY` in `.env`.
 
+`NEXT_PUBLIC_BASE_PATH` is a **dashboard build-arg** (Next.js `basePath`). It is ignored by `setup`, PR-Agent, and backup. Omit it only if the UI should live at `/`. For `/co-review`, set it on every command that builds the dashboard (`push` and `dashboard`).
+
 ```bash
 cd co-review
 docker login
 ./scripts/docker-buildx-co-review.sh setup
-REGISTRY=your-dockerhub-user ./scripts/docker-buildx-co-review.sh push
+REGISTRY=tuzaku95 NEXT_PUBLIC_BASE_PATH=/co-review ./scripts/docker-buildx-co-review.sh push
 ```
 
 That script tags PR-Agent as `:latest` by default. Set `COREVIEW_IMAGE_TAG=latest` in `.env`, or retag to `0.1.2` after push.
@@ -38,27 +41,19 @@ That script tags PR-Agent as `:latest` by default. Set `COREVIEW_IMAGE_TAG=lates
 **Apple Silicon:** multi-arch `linux/amd64` emulates via QEMU. Dashboard `bun run build` often hangs or SIGABRTs. For an ARM server:
 
 ```bash
-REGISTRY=your-dockerhub-user PLATFORMS=linux/arm64 ./scripts/docker-buildx-co-review.sh push
+REGISTRY=tuzaku95 PLATFORMS=linux/arm64 NEXT_PUBLIC_BASE_PATH=/co-review ./scripts/docker-buildx-co-review.sh push
 ```
 
 Dashboard only (after a UI change):
 
 ```bash
-REGISTRY=your-dockerhub-user PLATFORMS=linux/arm64 ./scripts/docker-buildx-co-review.sh dashboard
-
 REGISTRY=tuzaku95 PLATFORMS=linux/arm64 NEXT_PUBLIC_BASE_PATH=/co-review ./scripts/docker-buildx-co-review.sh dashboard
 ```
 
-Backup only:
+Backup only (no base path):
 
 ```bash
-REGISTRY=your-dockerhub-user PLATFORMS=linux/arm64 ./scripts/docker-buildx-co-review.sh backup
-```
-
-If the UI is served under a path (for example `/co-review`), bake it at **build** time:
-
-```bash
-REGISTRY=your-dockerhub-user NEXT_PUBLIC_BASE_PATH=/co-review ./scripts/docker-buildx-co-review.sh dashboard
+REGISTRY=tuzaku95 PLATFORMS=linux/arm64 ./scripts/docker-buildx-co-review.sh backup
 ```
 
 Do **not** run `docker-buildx-co-review.sh` on the production host. After backup is on Hub, start it with `--profile backup` (see below).
@@ -82,7 +77,7 @@ docker compose -f docker-compose.prod.yml --env-file .env pull
 # skip DevLake:  ./scripts/stack-up.sh --skip-devlake
 
 # dashboard only
-# docker compose -f docker-compose.prod.yml --env-file .env up -d --force-recreate --no-deps dashboard
+docker compose -f docker-compose.prod.yml --env-file .env up -d --force-recreate --no-deps dashboard
 ```
 
 If host port 3000 is taken, set `CO_REVIEW_DASHBOARD_PORT` in `.env`. Compose health for the dashboard is `GET /api/health` (not `/health`, which SSO redirects).
