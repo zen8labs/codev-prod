@@ -5,8 +5,9 @@
 # agent-server sandbox image (GHCR), which you also do not push from this repo.
 #
 # Deploy bundle on the server:
-#   docker-compose.prod.yml  (or copy as docker-compose.yml)
+#   docker-compose.prod.yml
 #   .env
+#   workspace/
 #
 # Run:
 #   docker compose -f docker-compose.prod.yml --env-file .env pull

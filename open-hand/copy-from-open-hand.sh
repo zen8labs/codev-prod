@@ -19,7 +19,6 @@ if [[ ! -f "$SRC/docker-compose.prod.yml" ]]; then
   exit 1
 fi
 
-cp "$SRC/docker-compose.prod.yml" "$DEST/docker-compose.yml"
 cp "$SRC/docker-compose.prod.yml" "$DEST/docker-compose.prod.yml"
 cp "$SRC/.env.example" "$DEST/.env.example"
 mkdir -p "$DEST/workspace"
