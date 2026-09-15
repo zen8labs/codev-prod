@@ -1,0 +1,474 @@
+# Production Compose — pull published images; do not clone application source.
+#
+# Deploy bundle on the server (not a git checkout of the app):
+#   docker-compose.prod.yml
+#   .env                    (secrets + host ports; copy from .env.example)
+#
+# Release (CI / build machine, with the repo):
+#   ./scripts/docker-buildx-co-review.sh setup
+#   REGISTRY=baotq4 ./scripts/docker-buildx-co-review.sh push
+#   then bump COREVIEW_IMAGE_TAG (or retag) to match what you pushed.
+#
+# Run:
+#   docker compose -f docker-compose.prod.yml --env-file .env pull
+#   docker compose -f docker-compose.prod.yml --env-file .env --profile devlake up -d --wait
+#
+# Differences from docker-compose.yml (local/dev):
+#   - no `build:` (never compiles on the server)
+#   - no bind-mounts from ./pr-agent, ./postgresql, ./devlake, ./backup
+#   - Postgres pg_hba is written in the container entrypoint (needed for PITR/backup)
+#   - Grafana iframe settings via GF_* env (same as ./devlake/grafana.ini)
+#   - PR-Agent uses in-image configuration.toml; git/LLM secrets from DB + .env
+#     (do not ship .secrets.toml). Optional: bake .pr_agent.toml into the image at build.
+#   - DB ports are not published; only UI / webhook / API ports are.
+#
+# Backup profile needs a published image (not yet in docker-buildx-co-review.sh):
+#   docker compose -f docker-compose.prod.yml --profile backup up -d
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: co-review-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - wal_archive:/wal_archive
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        mkdir -p /wal_archive /etc/postgresql
+        # Keep in sync with postgresql/pg_hba.conf (prod has no bind-mount).
+        cat > /etc/postgresql/pg_hba.conf <<'HBA'
+        local   all             all                                     trust
+        host    all             all             127.0.0.1/32            trust
+        host    all             all             ::1/128                 trust
+        host    all             all             0.0.0.0/0               scram-sha-256
+        host    all             all             ::/0                    scram-sha-256
+        host    replication     all             0.0.0.0/0               scram-sha-256
+        host    replication     all             ::/0                    scram-sha-256
+        HBA
+        chown -R postgres:postgres /wal_archive
+        chmod 700 /wal_archive
+        exec docker-entrypoint.sh postgres \
+          -c hba_file=/etc/postgresql/pg_hba.conf \
+          -c wal_level=replica \
+          -c archive_mode=on \
+          -c "archive_command=test -f /wal_archive/%f || cp %p /wal_archive/%f" \
+          -c archive_timeout=300 \
+          -c max_wal_size=1GB \
+          -c min_wal_size=256MB
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  devlake-mysql:
+    image: mysql:8
+    container_name: co-review-devlake-mysql
+    restart: unless-stopped
+    profiles:
+      - devlake
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DEVLAKE_MYSQL_ROOT_PASSWORD:-change_me_devlake_root}
+      MYSQL_DATABASE: ${DEVLAKE_MYSQL_DATABASE:-lake}
+      MYSQL_USER: ${DEVLAKE_MYSQL_USER:-merico}
+      MYSQL_PASSWORD: ${DEVLAKE_MYSQL_PASSWORD:-merico}
+      TZ: ${DEVLAKE_TZ:-UTC}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_bin
+      - --skip-log-bin
+    volumes:
+      - devlake_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-p${DEVLAKE_MYSQL_ROOT_PASSWORD:-change_me_devlake_root}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  devlake-grafana:
+    image: devlake.docker.scarf.sh/apache/devlake-dashboard:${DEVLAKE_VERSION:-v1.0.2-beta8}
+    container_name: co-review-devlake-grafana
+    restart: unless-stopped
+    profiles:
+      - devlake
+    environment:
+      GF_SERVER_ROOT_URL: ${DEVLAKE_GRAFANA_ROOT_URL:-http://localhost:30090/grafana}
+      GF_USERS_DEFAULT_THEME: ${DEVLAKE_GRAFANA_DEFAULT_THEME:-light}
+      GF_SECURITY_ADMIN_USER: ${DEVLAKE_GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${DEVLAKE_GRAFANA_ADMIN_PASSWORD:-change_me_grafana_admin}
+      MYSQL_URL: devlake-mysql:3306
+      MYSQL_DATABASE: ${DEVLAKE_MYSQL_DATABASE:-lake}
+      MYSQL_USER: ${DEVLAKE_MYSQL_USER:-merico}
+      MYSQL_PASSWORD: ${DEVLAKE_MYSQL_PASSWORD:-merico}
+      TZ: ${DEVLAKE_TZ:-UTC}
+      GF_SERVER_SERVE_FROM_SUB_PATH: true
+      GF_SECURITY_ALLOW_EMBEDDING: true
+      GF_SECURITY_COOKIE_SECURE: true
+      GF_SECURITY_COOKIE_SAMESITE: none
+      GF_AUTH_ANONYMOUS_ENABLED: true
+      GF_AUTH_ANONYMOUS_ORG_NAME: Main Org.
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_AUTH_DISABLE_LOGIN_FORM: false
+    volumes:
+      - devlake_grafana_data:/var/lib/grafana
+    depends_on:
+      devlake-mysql:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -q -O /dev/null http://127.0.0.1:3000/api/health || curl -fsS http://127.0.0.1:3000/api/health >/dev/null",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  devlake:
+    image: devlake.docker.scarf.sh/apache/devlake:${DEVLAKE_VERSION:-v1.0.2-beta8}
+    container_name: co-review-devlake
+    restart: unless-stopped
+    profiles:
+      - devlake
+    env_file:
+      - ./.env
+    environment:
+      LOGGING_DIR: /app/logs
+      TZ: ${DEVLAKE_TZ:-UTC}
+    volumes:
+      - devlake_log:/app/logs
+    depends_on:
+      devlake-mysql:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -q -O /dev/null http://127.0.0.1:8080/health || curl -fsS http://127.0.0.1:8080/health >/dev/null",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  devlake-config-ui:
+    image: devlake.docker.scarf.sh/apache/devlake-config-ui:${DEVLAKE_VERSION:-v1.0.2-beta8}
+    container_name: co-review-devlake-config-ui
+    restart: unless-stopped
+    profiles:
+      - devlake
+    ports:
+      - "${DEVLAKE_UI_HOST_PORT:-30090}:4000"
+    env_file:
+      - ./.env
+    environment:
+      DEVLAKE_ENDPOINT: devlake:8080
+      GRAFANA_ENDPOINT: devlake-grafana:3000
+      TZ: ${DEVLAKE_TZ:-UTC}
+    depends_on:
+      devlake:
+        condition: service_healthy
+      devlake-grafana:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -q -O /dev/null http://127.0.0.1:4000/health/ || curl -fsS http://127.0.0.1:4000/health/ >/dev/null",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  pr-agent-api:
+    image: ${COREVIEW_REGISTRY:-baotq4}/vtnet-coreview-pr-agent-api:${COREVIEW_IMAGE_TAG:-0.1.2}
+    pull_policy: always
+    container_name: co-review-pr-agent-api
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      GIT_PROVIDER_CREDENTIALS_ENCRYPTION_KEY: ${GIT_PROVIDER_CREDENTIALS_ENCRYPTION_KEY}
+      API_HOST: "0.0.0.0"
+      API_PORT: "3001"
+      SSO_AUTH_DISABLED: ${SSO_AUTH_DISABLED:-false}
+      DASHBOARD_BOOTSTRAP_ADMIN_EMAILS: ${DASHBOARD_BOOTSTRAP_ADMIN_EMAILS:-}
+      ORG_SCOPE_GIT_PROVIDERS: ${ORG_SCOPE_GIT_PROVIDERS:-false}
+      ORG_SCOPE_LLM_PROVIDERS: ${ORG_SCOPE_LLM_PROVIDERS:-false}
+      ORG_SCOPE_PEER_GRANTS: ${ORG_SCOPE_PEER_GRANTS:-true}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL}
+      DEVLAKE_API_BASE_URL: ${DEVLAKE_API_BASE_URL}
+      DEVLAKE_API_PREFIX: ${DEVLAKE_API_PREFIX-}
+      DEVLAKE_API_TOKEN: ${DEVLAKE_API_TOKEN:-}
+      DEVLAKE_API_AUTH_HEADER: ${DEVLAKE_API_AUTH_HEADER:-Authorization}
+      DEVLAKE_API_AUTH_SCHEME: ${DEVLAKE_API_AUTH_SCHEME:-Bearer}
+      DEVLAKE_API_TIMEOUT_SEC: ${DEVLAKE_API_TIMEOUT_SEC:-30}
+      DEVLAKE_API_VERIFY_TLS: ${DEVLAKE_API_VERIFY_TLS:-true}
+      DEVLAKE_GRAFANA_EMBED_BASE_URL: ${DEVLAKE_GRAFANA_EMBED_BASE_URL:-}
+      DEVLAKE_GRAFANA_EMBED_DASHBOARD_UID_MAP: ${DEVLAKE_GRAFANA_EMBED_DASHBOARD_UID_MAP:-}
+      DEVLAKE_GRAFANA_EMBED_ALLOWED_HOSTS: ${DEVLAKE_GRAFANA_EMBED_ALLOWED_HOSTS:-}
+      COREVIEW_TRIGGER_TOKEN: ${COREVIEW_TRIGGER_TOKEN:-}
+      AGENT_EXTERNAL_URL: ${AGENT_EXTERNAL_URL:-}
+      AGENT_EXTERNAL_TIMEOUT_SEC: ${AGENT_EXTERNAL_TIMEOUT_SEC:-120}
+      AGENT_EXTERNAL_SECRET: ${AGENT_EXTERNAL_SECRET:-}
+      AGENT_EXTERNAL_CALLBACK_URL: ${AGENT_EXTERNAL_CALLBACK_URL:-}
+      AGENT_EXTERNAL_COMPLETION_CALLBACK_URL: ${AGENT_EXTERNAL_COMPLETION_CALLBACK_URL:-}
+      BACKUP_HTTP_URL: ${BACKUP_HTTP_URL:-http://backup:8080}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    entrypoint: ["python", "-m", "pr_agent.servers.api"]
+
+  pr-agent-github:
+    image: ${COREVIEW_REGISTRY:-baotq4}/vtnet-coreview-pr-agent-github:${COREVIEW_IMAGE_TAG:-0.1.2}
+    pull_policy: always
+    container_name: co-review-pr-agent-github
+    restart: unless-stopped
+    ports:
+      - "${PR_AGENT_GITHUB_WEBHOOK_RECIEVE_PORT:-3002}:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      PORT: "3000"
+      DATABASE_URL: ${DATABASE_URL}
+      GIT_PROVIDER_CREDENTIALS_ENCRYPTION_KEY: ${GIT_PROVIDER_CREDENTIALS_ENCRYPTION_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL}
+      GITHUB_EXTERNAL: ${GITHUB_EXTERNAL:-false}
+      AGENT_EXTERNAL_URL: ${AGENT_EXTERNAL_URL:-}
+      AGENT_EXTERNAL_TIMEOUT_SEC: ${AGENT_EXTERNAL_TIMEOUT_SEC:-120}
+      AGENT_EXTERNAL_SECRET: ${AGENT_EXTERNAL_SECRET:-}
+      AGENT_EXTERNAL_CALLBACK_URL: ${AGENT_EXTERNAL_CALLBACK_URL:-}
+      AGENT_EXTERNAL_COMPLETION_CALLBACK_URL: ${AGENT_EXTERNAL_COMPLETION_CALLBACK_URL:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    entrypoint: ["python", "-m", "pr_agent.servers.github_app"]
+
+  pr-agent-gitlab:
+    image: ${COREVIEW_REGISTRY:-baotq4}/vtnet-coreview-pr-agent-gitlab:${COREVIEW_IMAGE_TAG:-0.1.2}
+    pull_policy: always
+    container_name: co-review-pr-agent-gitlab
+    restart: unless-stopped
+    ports:
+      - "${PR_AGENT_GITLAB_WEBHOOK_RECIEVE_PORT:-3003}:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      PORT: "3000"
+      DATABASE_URL: ${DATABASE_URL}
+      GIT_PROVIDER_CREDENTIALS_ENCRYPTION_KEY: ${GIT_PROVIDER_CREDENTIALS_ENCRYPTION_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL}
+      GITLAB_EXTERNAL: ${GITLAB_EXTERNAL:-false}
+      AGENT_EXTERNAL_URL: ${AGENT_EXTERNAL_URL:-}
+      AGENT_EXTERNAL_TIMEOUT_SEC: ${AGENT_EXTERNAL_TIMEOUT_SEC:-120}
+      AGENT_EXTERNAL_SECRET: ${AGENT_EXTERNAL_SECRET:-}
+      AGENT_EXTERNAL_CALLBACK_URL: ${AGENT_EXTERNAL_CALLBACK_URL:-}
+      AGENT_EXTERNAL_COMPLETION_CALLBACK_URL: ${AGENT_EXTERNAL_COMPLETION_CALLBACK_URL:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    entrypoint: ["python", "-m", "pr_agent.servers.gitlab_webhook"]
+
+  pr-agent-bitbucket:
+    image: ${COREVIEW_REGISTRY:-baotq4}/vtnet-coreview-pr-agent-bitbucket:${COREVIEW_IMAGE_TAG:-0.1.2}
+    pull_policy: always
+    container_name: co-review-pr-agent-bitbucket
+    restart: unless-stopped
+    ports:
+      - "${PR_AGENT_BITBUCKET_WEBHOOK_RECIEVE_PORT:-3004}:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      PORT: "3000"
+      DATABASE_URL: ${DATABASE_URL}
+      GIT_PROVIDER_CREDENTIALS_ENCRYPTION_KEY: ${GIT_PROVIDER_CREDENTIALS_ENCRYPTION_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL}
+      BITBUCKET_EXTERNAL: ${BITBUCKET_EXTERNAL:-false}
+      AGENT_EXTERNAL_URL: ${AGENT_EXTERNAL_URL:-}
+      AGENT_EXTERNAL_TIMEOUT_SEC: ${AGENT_EXTERNAL_TIMEOUT_SEC:-120}
+      AGENT_EXTERNAL_SECRET: ${AGENT_EXTERNAL_SECRET:-}
+      AGENT_EXTERNAL_CALLBACK_URL: ${AGENT_EXTERNAL_CALLBACK_URL:-}
+      AGENT_EXTERNAL_COMPLETION_CALLBACK_URL: ${AGENT_EXTERNAL_COMPLETION_CALLBACK_URL:-}
+      BITBUCKET_SERVER__URL: ${BITBUCKET_SERVER_URL:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    entrypoint: ["python", "-m", "pr_agent.servers.bitbucket_app"]
+
+  pr-agent-azuredevops:
+    image: ${COREVIEW_REGISTRY:-baotq4}/vtnet-coreview-pr-agent-azuredevops:${COREVIEW_IMAGE_TAG:-0.1.2}
+    pull_policy: always
+    container_name: co-review-pr-agent-azuredevops
+    restart: unless-stopped
+    profiles:
+      - azuredevops
+    ports:
+      - "${PR_AGENT_AZUREDEVOPS_WEBHOOK_RECEIVE_PORT:-3005}:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      PORT: "3000"
+      DATABASE_URL: ${DATABASE_URL}
+      GIT_PROVIDER_CREDENTIALS_ENCRYPTION_KEY: ${GIT_PROVIDER_CREDENTIALS_ENCRYPTION_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL}
+      AZUREDEVOPS_EXTERNAL: ${AZUREDEVOPS_EXTERNAL:-false}
+      AGENT_EXTERNAL_URL: ${AGENT_EXTERNAL_URL:-}
+      AGENT_EXTERNAL_TIMEOUT_SEC: ${AGENT_EXTERNAL_TIMEOUT_SEC:-120}
+      AGENT_EXTERNAL_SECRET: ${AGENT_EXTERNAL_SECRET:-}
+      AGENT_EXTERNAL_CALLBACK_URL: ${AGENT_EXTERNAL_CALLBACK_URL:-}
+      AGENT_EXTERNAL_COMPLETION_CALLBACK_URL: ${AGENT_EXTERNAL_COMPLETION_CALLBACK_URL:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    entrypoint: ["python", "-m", "pr_agent.servers.azuredevops_server_webhook"]
+
+  dashboard:
+    image: ${COREVIEW_REGISTRY:-baotq4}/vtnet-coreview-dashboard:${COREVIEW_IMAGE_TAG:-0.1.2}
+    pull_policy: always
+    container_name: co-review-dashboard
+    restart: unless-stopped
+    ports:
+      - "${CO_REVIEW_DASHBOARD_PORT:-3000}:3000"
+    environment:
+      NODE_ENV: production
+      PR_AGENT_API_URL: ${PR_AGENT_API_URL:-http://pr-agent-api:3001}
+      DASHBOARD_PUBLIC_BASE_URL: ${DASHBOARD_PUBLIC_BASE_URL:-http://localhost:3000}
+      SSO_BASE_URL: ${SSO_BASE_URL:-https://netmind.viettel.vn/sso-wrapper}
+      SSO_CLIENT_ID: ${SSO_CLIENT_ID:-litellm-test}
+      SSO_SESSION_SECRET: ${SSO_SESSION_SECRET:?SSO_SESSION_SECRET is required}
+      SSO_AUTH_DISABLED: ${SSO_AUTH_DISABLED:-false}
+      SSO_SESSION_TTL_SECONDS: ${SSO_SESSION_TTL_SECONDS:-28800}
+      DASHBOARD_BOOTSTRAP_ADMIN_EMAILS: ${DASHBOARD_BOOTSTRAP_ADMIN_EMAILS:-}
+      NEXT_PUBLIC_DEVLAKE_GRAFANA_BASE_URL: ${NEXT_PUBLIC_DEVLAKE_GRAFANA_BASE_URL:-}
+      NEXT_PUBLIC_DEVLAKE_GRAFANA_DASHBOARD_UID_MAP: ${NEXT_PUBLIC_DEVLAKE_GRAFANA_DASHBOARD_UID_MAP:-}
+      DEVLAKE_GRAFANA_EMBED_BASE_URL: ${DEVLAKE_GRAFANA_EMBED_BASE_URL:-}
+      DEVLAKE_GRAFANA_EMBED_DASHBOARD_UID_MAP: ${DEVLAKE_GRAFANA_EMBED_DASHBOARD_UID_MAP:-}
+      DEVLAKE_GRAFANA_EMBED_ALLOWED_HOSTS: ${DEVLAKE_GRAFANA_EMBED_ALLOWED_HOSTS:-}
+      NEXT_PUBLIC_BASE_PATH: ${NEXT_PUBLIC_BASE_PATH:-}
+    depends_on:
+      pr-agent-api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "-q",
+          "-O",
+          "/dev/null",
+          "http://127.0.0.1:3000${NEXT_PUBLIC_BASE_PATH:-}/health",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  backup:
+    image: ${COREVIEW_REGISTRY:-baotq4}/vtnet-coreview-backup:${COREVIEW_IMAGE_TAG:-0.1.2}
+    pull_policy: always
+    container_name: co-review-backup
+    restart: unless-stopped
+    profiles:
+      - backup
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      BACKUP_DEST: ${BACKUP_DEST:-/app/backup}
+      BACKUP_ENCRYPTION_KEY: ${BACKUP_ENCRYPTION_KEY}
+      BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS:-6}
+      RETENTION_DAYS: ${RETENTION_DAYS:-14}
+      GIT_PROVIDER_CREDENTIALS_ENCRYPTION_KEY: ${GIT_PROVIDER_CREDENTIALS_ENCRYPTION_KEY}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_REGION: ${AWS_REGION:-ap-southeast-1}
+      DEVLAKE_MYSQL_HOST: ${DEVLAKE_MYSQL_HOST:-devlake-mysql}
+      DEVLAKE_MYSQL_HOST_PORT: "3306"
+      DEVLAKE_MYSQL_USER: ${DEVLAKE_MYSQL_USER:-merico}
+      DEVLAKE_MYSQL_PASSWORD: ${DEVLAKE_MYSQL_PASSWORD:-merico}
+      DEVLAKE_MYSQL_DATABASE: ${DEVLAKE_MYSQL_DATABASE:-lake}
+      DEVLAKE_VERSION: ${DEVLAKE_VERSION:-v1.0.2-beta8}
+      BACKUP_HTTP_PORT: ${BACKUP_HTTP_PORT:-8080}
+      PR_AGENT_API_URL: ${PR_AGENT_API_URL:-http://pr-agent-api:3001}
+      BACKUP_PITR_ENABLED: ${BACKUP_PITR_ENABLED:-false}
+      WAL_ARCHIVE_DIR: ${WAL_ARCHIVE_DIR:-/wal_archive}
+    volumes:
+      - backup_data:/app/backup
+      - wal_archive:/wal_archive
+    depends_on:
+      postgres:
+        condition: service_healthy
+      pr-agent-api:
+        condition: service_healthy
+
+  minio:
+    image: minio/minio:latest
+    container_name: co-review-minio
+    restart: unless-stopped
+    profiles:
+      - backup
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  postgres_data:
+  wal_archive:
+  backup_data:
+  devlake_mysql_data:
+  devlake_grafana_data:
+  devlake_log:
+  minio_data:
