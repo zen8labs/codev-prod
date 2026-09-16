@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Orchestrate Co-review startup: validate env, Compose (dependency order),
-# optional Open-Hand, wait for API migrations, then health-check each service.
+# wait for API migrations, then health-check each service.
+# Open-Hand is a separate stack (codev-prod/open-hand); do not start it here.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${ENV_FILE:-$ROOT_DIR/.env}"
 LOG_FILE="${STACK_INIT_LOG:-$ROOT_DIR/logs/stack-init.log}"
-OPENHANDS_DIR="${OPENHANDS_DIR:-$(cd "$ROOT_DIR/.." && pwd)/Open-Hand}"
 if [[ -z "${COMPOSE_FILE:-}" ]]; then
   if [[ -f "$ROOT_DIR/docker-compose.yml" ]]; then
     COMPOSE_FILE="$ROOT_DIR/docker-compose.yml"
@@ -16,7 +16,6 @@ if [[ -z "${COMPOSE_FILE:-}" ]]; then
 fi
 
 WITH_DEVLAKE=1
-WITH_EXTERNAL_AGENT=0
 VALIDATE_ONLY=0
 HEALTH_ONLY=0
 
@@ -28,9 +27,7 @@ Usage: $(basename "$0") [options]
   --validate-only
   --health-only
   --skip-devlake
-  --with-external-agent   Also start Open-Hand from a separate Compose file
   --env-file PATH          Default: co-review/.env
-  --openhands-dir PATH     Default: sibling Open-Hand directory
 EOF
 }
 
@@ -40,14 +37,8 @@ while [[ $# -gt 0 ]]; do
     --health-only) HEALTH_ONLY=1 ;;
     --skip-devlake) WITH_DEVLAKE=0 ;;
     --with-devlake) WITH_DEVLAKE=1 ;;
-    --with-external-agent) WITH_EXTERNAL_AGENT=1 ;;
-    --skip-external-agent) WITH_EXTERNAL_AGENT=0 ;;
     --env-file)
       ENV_FILE="$2"
-      shift
-      ;;
-    --openhands-dir)
-      OPENHANDS_DIR="$2"
       shift
       ;;
     -h|--help)
@@ -157,7 +148,7 @@ run_health() {
   base_path="$(read_env NEXT_PUBLIC_BASE_PATH "")"
   pg_user="$(read_env POSTGRES_USER postgres)"
 
-  log "--- step 5: health checks ---"
+  log "--- health checks ---"
 
   check_one "postgres (pg_isready)" \
     compose exec -T postgres pg_isready -U "$pg_user" || failed=1
@@ -196,24 +187,6 @@ run_health() {
     step_skip "health DevLake/Grafana (profile not requested)"
   fi
 
-  if [[ "$WITH_EXTERNAL_AGENT" -eq 1 ]]; then
-    local oh_port="3000"
-    if [[ -f "$OPENHANDS_DIR/.env" ]]; then
-      oh_port="$(ENV_FILE="$OPENHANDS_DIR/.env" read_env SANDBOX_HOST_PORT 3000)"
-    fi
-    if curl -fsS "http://127.0.0.1:${oh_port}/health" >/dev/null 2>&1; then
-      step_ok "health openhands /health (host :${oh_port})"
-    elif docker compose --env-file "${OPENHANDS_DIR}/.env" -f "$OPENHANDS_DIR/docker-compose.yml" \
-         exec -T openhands curl -fsS "http://127.0.0.1:3000/health" >/dev/null 2>&1; then
-      step_ok "health openhands /health (container)"
-    else
-      step_fail "health openhands /health"
-      failed=1
-    fi
-  else
-    step_skip "health Open-Hand (not started by this run)"
-  fi
-
   return "$failed"
 }
 
@@ -221,7 +194,6 @@ run_validate() {
   log "--- step 1: validate configuration ---"
   local extra=()
   [[ "$WITH_DEVLAKE" -eq 1 ]] && extra+=(--with-devlake)
-  [[ "$WITH_EXTERNAL_AGENT" -eq 1 ]] && extra+=(--with-external-agent)
   if python3 "$ROOT_DIR/scripts/validate_env.py" --env-file "$ENV_FILE" "${extra[@]+"${extra[@]}"}"; then
     step_ok "step 1 configuration"
     return 0
@@ -260,35 +232,15 @@ else
   exit 1
 fi
 
-log "--- step 3: External Review Agent (separate Compose) ---"
-if [[ "$WITH_EXTERNAL_AGENT" -eq 1 ]]; then
-  if [[ ! -f "$OPENHANDS_DIR/docker-compose.yml" ]]; then
-    step_fail "step 3 Open-Hand compose not found at $OPENHANDS_DIR/docker-compose.yml"
-    exit 1
-  fi
-  if [[ ! -f "$OPENHANDS_DIR/.env" ]]; then
-    step_fail "step 3 Open-Hand .env not found (copy Open-Hand/.env.example)"
-    exit 1
-  fi
-  if docker compose --env-file "${OPENHANDS_DIR}/.env" -f "$OPENHANDS_DIR/docker-compose.yml" up -d --wait; then
-    step_ok "step 3 Open-Hand"
-  else
-    step_fail "step 3 Open-Hand"
-    exit 1
-  fi
-else
-  step_skip "step 3 Open-Hand (pass --with-external-agent)"
-fi
-
-log "--- step 4: wait for PR-Agent API migrations (/ready) ---"
+log "--- step 3: wait for PR-Agent API migrations (/ready) ---"
 if exec_http pr-agent-api "http://127.0.0.1:3001/ready"; then
-  step_ok "step 4 API ready (schema at head)"
+  step_ok "step 3 API ready (schema at head)"
 else
-  step_fail "step 4 API /ready"
+  step_fail "step 3 API /ready"
   exit 1
 fi
 
-log "--- step 6: health summary ---"
+log "--- step 4: health summary ---"
 if run_health; then
   step_ok "all requested health checks passed"
   log "done"
