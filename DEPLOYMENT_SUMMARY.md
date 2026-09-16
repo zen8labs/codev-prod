@@ -34,7 +34,7 @@ In `.env` set (browser URL, not `localhost` on a remote host):
 - `DEVLAKE_GRAFANA_EMBED_DASHBOARD_UID_MAP` (e.g. `github:coreview-github,gitlab:coreview-gitlab,bitbucket:coreview-bitbucket`)
 
 ```bash
-docker compose -f docker-compose.prod.yml --env-file .env up -d dashboard
+docker compose -f docker-compose.prod.yml --env-file .env up -d --force-recreate --no-deps dashboard
 ```
 
 Config UI: port `DEVLAKE_UI_HOST_PORT` (default 30090). Skip this section if you do not need Analytics.
