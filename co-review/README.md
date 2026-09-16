@@ -134,8 +134,15 @@ docker compose -f docker-compose.prod.yml --env-file .env up -d dashboard
 
 ### 2.4 Backup (optional)
 
-Requires Hub image `${COREVIEW_REGISTRY}/vtnet-coreview-backup:${COREVIEW_IMAGE_TAG}` (from `docker-buildx-co-review.sh backup` or `push`). Minio is in the same profile.
+Requires Hub image `${COREVIEW_REGISTRY}/vtnet-coreview-backup:${COREVIEW_IMAGE_TAG}` (from `docker-buildx-co-review.sh backup` or `push`).
+
+`--profile backup` starts **backup** and **Minio**. That is enough if Co-review Postgres is already up.
+
+Add `--profile devlake` only if you also want DevLake’s MySQL dumped. The backup job connects to `devlake-mysql`. If you already ran `stack-up.sh` with DevLake, MySQL is running and you can omit `--profile devlake`. If you used `--skip-devlake`, skip it here too (Postgres still backs up; the MySQL dump will fail if that host is missing).
 
 ```bash
-docker compose -f docker-compose.prod.yml --env-file .env --profile backup --profile devlake up -d
+docker compose -f docker-compose.prod.yml --env-file .env --profile backup up -d
+
+# also dump DevLake MySQL (starts lake/grafana/mysql if they are not running):
+# docker compose -f docker-compose.prod.yml --env-file .env --profile backup --profile devlake up -d
 ```
