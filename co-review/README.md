@@ -81,40 +81,58 @@ docker compose -f docker-compose.prod.yml --env-file .env up -d --force-recreate
 
 If host port 3000 is taken, set `CO_REVIEW_DASHBOARD_PORT` in `.env`. Compose health for the dashboard is `GET /api/health` (not `/health`, which SSO redirects).
 
-### 2.4 Login and `/co-review` base path
+### 2.2 Login and `/co-review` base path
 
-`NEXT_PUBLIC_BASE_PATH` is **not** enough in `.env` alone. Next.js `basePath` is fixed when the **dashboard image is built**. Runtime env must match that bake, and SSO/nginx must use the same path.
+The `/co-review` prefix is **baked into the dashboard image** at build time (§1.2). You can open `http://localhost:3000/co-review/en-US` even if `.env` has no `NEXT_PUBLIC_BASE_PATH` — Next.js `basePath` does not change when the container starts.
 
-| Place               | What to set                                                                                                                  |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| Image build         | `NEXT_PUBLIC_BASE_PATH=/co-review` on `docker-buildx-co-review.sh dashboard` (see §1.2)                                      |
-| `.env` (same value) | `NEXT_PUBLIC_BASE_PATH=/co-review`                                                                                           |
-| `.env`              | `DASHBOARD_PUBLIC_BASE_URL=https://your.public.host` — **origin only**, no `/co-review`                                      |
-| SSO IdP             | `redirect_uri` = `{DASHBOARD_PUBLIC_BASE_URL}/co-review/auth/sso/callback`                                                   |
-| Browser             | Open `{origin}/co-review/` (not `{origin}/` if basePath is set)                                                              |
-| nginx               | `location /co-review/` must `proxy_pass` to the dashboard **keeping** `/co-review` on the upstream (Next serves that prefix) |
+Still set `NEXT_PUBLIC_BASE_PATH=/co-review` in `.env` so it **matches the image**. Compose and `stack-up.sh` use that value for the health probe (`/co-review/api/health`). If it is empty, the site can work while the dashboard container looks **unhealthy**.
 
-If you built the image **without** the build-arg, the app lives at `/`. Putting `/co-review` only in `.env` makes SSO `redirect_uri` include `/co-review` while Next still serves `/auth/sso/callback` — login breaks. Rebuild the dashboard with the build-arg, or clear `NEXT_PUBLIC_BASE_PATH` and use the site root.
+| Place               | What to set                                                                                        |
+| ------------------- | -------------------------------------------------------------------------------------------------- |
+| Image build         | `NEXT_PUBLIC_BASE_PATH=/co-review` on `push` / `dashboard` (see §1.2)                              |
+| `.env` (same value) | `NEXT_PUBLIC_BASE_PATH=/co-review` — healthcheck / SSO helpers; does **not** move the app          |
+| `.env`              | `DASHBOARD_PUBLIC_BASE_URL=https://your.public.host` — **origin only**, no `/co-review`            |
+| SSO IdP             | `redirect_uri` = `{origin}/co-review/auth/sso/callback`                                            |
+| Browser             | Open `{origin}/co-review/`                                                                         |
+| nginx               | `location /co-review/` must `proxy_pass` to the dashboard **keeping** `/co-review` on the upstream |
 
-Local sim without nginx: `http://localhost:${CO_REVIEW_DASHBOARD_PORT}/co-review/en-US/login` after a baked image.
-
-Register SSO `redirect_uri` as `{DASHBOARD_PUBLIC_BASE_URL}{NEXT_PUBLIC_BASE_PATH}/auth/sso/callback`.
+If you built the image **without** the build-arg, the app lives at `/`. Setting `/co-review` only in `.env` does not move it.
 
 A public IdP such as `https://netmind.viettel.vn/sso-wrapper` is reachable from the dashboard container with `SSO_BASE_URL` alone. A host-only IdP at `localhost` is rewritten to `host.docker.internal` inside the container (Compose `extra_hosts`).
 
-### 2.2 Grafana embed (once, after DevLake is healthy)
+### 2.3 Grafana embed (once, after DevLake is healthy)
+
+`stack-up.sh` only **starts** DevLake and Grafana. It does not create the charts Co-review shows on **Analytics**.
+
+This script talks to Grafana’s API and:
+
+1. Waits until Grafana is up.
+2. Makes a folder **CoReview Dashboards**.
+3. Copies the built-in GitHub / GitLab / Bitbucket / Azure DevOps dashboards into that folder with **fixed IDs** (`coreview-github`, and so on).
+4. Prints Grafana URL + dashboard UID lines for `.env`.
+
+Co-review embeds Grafana by those IDs. Run this **once** per new Grafana (or after Grafana data is wiped). Skip it if you do not use Analytics.
 
 ```bash
 ./scripts/devlake-setup-grafana-dashboards.sh
 ```
 
-Paste the printed Grafana UID lines into `.env`, then:
+The script prints two `NEXT_PUBLIC_DEVLAKE_GRAFANA_*` lines. On production, paste the **same values** into these `.env` keys (runtime; no image rebuild):
+
+| Script prints                                                                   | Put in `.env`                                                                                                                                                         |
+| ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NEXT_PUBLIC_DEVLAKE_GRAFANA_BASE_URL=…`                                        | `DEVLAKE_GRAFANA_EMBED_BASE_URL` — URL the **browser** uses to load Grafana (not `localhost` on a remote server). Example: `https://your.public.host/devlake/grafana` |
+| `NEXT_PUBLIC_DEVLAKE_GRAFANA_DASHBOARD_UID_MAP=github:coreview-github,gitlab:…` | `DEVLAKE_GRAFANA_EMBED_DASHBOARD_UID_MAP` — same `github:…,gitlab:…,bitbucket:…,azure_devops:…` string                                                                |
+
+`NEXT_PUBLIC_DEVLAKE_GRAFANA_BASE_URL` and `NEXT_PUBLIC_DEVLAKE_GRAFANA_DASHBOARD_UID_MAP` still work as a fallback (local/dev). Prefer the `DEVLAKE_GRAFANA_EMBED_*` pair in production.
+
+Then recreate the dashboard so it reads `.env`:
 
 ```bash
 docker compose -f docker-compose.prod.yml --env-file .env up -d dashboard
 ```
 
-### 2.3 Backup (optional)
+### 2.4 Backup (optional)
 
 Requires Hub image `${COREVIEW_REGISTRY}/vtnet-coreview-backup:${COREVIEW_IMAGE_TAG}` (from `docker-buildx-co-review.sh backup` or `push`). Minio is in the same profile.
 
