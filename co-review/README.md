@@ -67,15 +67,39 @@ Unzip this folder. Docker Engine + Compose. Private Hub repos: `docker login` on
 
 ### 2.1 Configure and start
 
-```bash
-# COREVIEW_REGISTRY / COREVIEW_IMAGE_TAG must match what you pushed
-nano .env
+Create `.env` **once**, then fill the keys below:
 
+```bash
+cp -n .env.example .env
+nano .env
+```
+
+(`cp -n` does not overwrite an existing `.env`.)
+
+| Key | Example |
+| --- | --- |
+| `COREVIEW_REGISTRY` | `tuzaku95` (Docker Hub user; must match the pulled images) |
+| `COREVIEW_IMAGE_TAG` | `latest` or `0.1.2` |
+| `CO_REVIEW_DASHBOARD_PORT` | `3000` |
+| `DASHBOARD_PUBLIC_BASE_URL` | `https://netmind.viettel.vn` (origin only, no `/co-review`) |
+| `NEXT_PUBLIC_BASE_PATH` | `/co-review` (must match the baked dashboard image; needed for healthcheck) |
+| `SSO_BASE_URL` | `https://netmind.viettel.vn/sso-wrapper` |
+| `SSO_CLIENT_ID` | `litellm-test` |
+| `SSO_SESSION_SECRET` | output of `openssl rand -base64 48` |
+| `DASHBOARD_BOOTSTRAP_ADMIN_EMAILS` | `alice@company.com,bob@company.com` |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `postgres` / a strong password / `pr_agent` |
+| `DATABASE_URL` | `postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}` |
+| `GIT_PROVIDER_CREDENTIALS_ENCRYPTION_KEY` | output of `openssl rand -base64 32` |
+| `ENCRYPTION_SECRET` | DevLake encrypt-at-rest secret (`openssl rand -base64 2000 \| tr -dc 'A-Z' \| fold -w 128 \| head -n 1`) |
+| `DEVLAKE_MYSQL_ROOT_PASSWORD` | a strong password (required if you start DevLake) |
+| `AGENT_EXTERNAL_URL` | `http://host.docker.internal:3005` (required if any `*_EXTERNAL=true`) |
+
+```bash
 docker compose -f docker-compose.prod.yml --env-file .env pull
 ./scripts/stack-up.sh
 # skip DevLake:  ./scripts/stack-up.sh --skip-devlake
 
-# dashboard only
+# dashboard only (after changing dashboard env)
 docker compose -f docker-compose.prod.yml --env-file .env up -d --force-recreate --no-deps dashboard
 ```
 
