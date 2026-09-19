@@ -35,7 +35,6 @@ _BOOL_KEYS = frozenset(
     }
 )
 _HTTP_OPTIONAL = (
-    "OPENAI_BASE_URL",
     "PR_AGENT_API_URL",
     "SSO_BASE_URL",
     "DASHBOARD_PUBLIC_BASE_URL",
