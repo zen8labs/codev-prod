@@ -1,6 +1,6 @@
 # Open-Hand production bundle
 
-Replace `REGISTRY=tuzaku95` with your Docker Hub username (`tuzaku95` is an example).
+Replace `tuzaku95` with your Docker Hub username (`tuzaku95` is an example). It is the start of each `-t` name.
 
 ## 1. Machine that contains the repo (for Zen8labs's team)
 
@@ -15,51 +15,55 @@ parent/
 
 ### 1.1 Build and push images
 
-From the **parent** of `Open-Hand/` and `OpenHands-SDK/` (not from inside `Open-Hand/`, not from this folder). Log in to Docker Hub first. The `-t` registry/name must match `OPENHANDS_REGISTRY` / image name in `.env` (`vtnet-openhands`).
+From the **parent** of `Open-Hand/` and `OpenHands-SDK/` (not from inside `Open-Hand/`, not from this folder). Docker only copies files from that folder (the build context). The SDK lives next to `Open-Hand/`, so the context cannot be `Open-Hand/` itself.
 
-```bash
-# Go to the folder that contains BOTH Open-Hand/ and OpenHands-SDK/.
-# Docker only COPYs files from this folder (the "build context"). The SDK
-# lives next to Open-Hand, so the context cannot be Open-Hand/ itself.
-cd parent
+Log in to Docker Hub first. The `-t` name must match `OPENHANDS_REGISTRY` and `OPENHANDS_IMAGE_TAG` in `.env` (`vtnet-openhands`, `0.1.2`). There is no build script for this image. `--push` uploads it when the build finishes. There is no separate `docker push`.
 
-# Log in to Docker Hub so --push can upload vtnet-openhands.
-docker login
-
-# One-time (or reuse) a buildx builder that can produce linux/amd64 + linux/arm64.
-docker buildx create --name openhands-multiarch --driver docker-container --use 2>/dev/null || docker buildx use openhands-multiarch
-
-docker buildx build \
-  --platform linux/amd64,linux/arm64 \
-  -f Open-Hand/containers/app/Dockerfile.local \
-  -t tuzaku95/vtnet-openhands:0.1.2 \
-  -t tuzaku95/vtnet-openhands:latest \
-  --push \
-  .
-# --platform  CPU types in the image (the server must match one of them)
-# -f          Dockerfile, relative to the parent folder you are in now
-# -t          Hub name:tag (must match OPENHANDS_REGISTRY / OPENHANDS_IMAGE_TAG)
-# --push      Upload to Hub
-# .           Build context = this parent folder (so COPY can see Open-Hand AND OpenHands-SDK)
+```text
+-f   Dockerfile, relative to the parent folder
+-t   Hub name:tag
+.    Build context (this parent folder, so COPY can see Open-Hand and OpenHands-SDK)
 ```
 
-**Apple Silicon:** multi-arch `linux/amd64` emulates via QEMU and may be slow or fail. For an ARM server:
-
-```bash
-# Same as above, but only ARM (faster on Apple Silicon when the server is ARM).
-# Still run from the parent directory. Context `.` is required for the same reason.
-docker buildx build \
-  --platform linux/arm64 \
-  -f Open-Hand/containers/app/Dockerfile.local \
-  -t tuzaku95/vtnet-openhands:0.1.2 \
-  -t tuzaku95/vtnet-openhands:latest \
-  --push \
-  .
-```
-
-Set `OPENHANDS_REGISTRY=tuzaku95` and `OPENHANDS_IMAGE_TAG=0.1.2` (or `latest`) in the server `.env` to match the tags you pushed.
+The production host is **linux/amd64**. Set `OPENHANDS_REGISTRY=tuzaku95` and `OPENHANDS_IMAGE_TAG=0.1.2` (or `latest`) in the server `.env` to match the tags you pushed.
 
 Do **not** run this build on the production host. Do **not** push the SDK or agent-server from this repo. If `ghcr.io/oadtq/agent-server` is private, `docker login ghcr.io` on the **server** (the app pulls it through the Docker socket on first review).
+
+#### Linux (amd64)
+
+amd64 is native. Build only that platform so Buildx does not also emulate arm64.
+
+```bash
+cd parent
+docker login
+
+docker buildx build \
+  --platform linux/amd64 \
+  -f Open-Hand/containers/app/Dockerfile.local \
+  -t tuzaku95/vtnet-openhands:0.1.2 \
+  -t tuzaku95/vtnet-openhands:latest \
+  --push \
+  .
+```
+
+#### Apple Silicon
+
+Turn on Docker Desktop → Settings → General → **Use Rosetta for x86/amd64 emulation on Apple Silicon**. Build with the `desktop-linux` builder so the image is still `linux/amd64` for the server. `--builder desktop-linux` exists only in Docker Desktop.
+
+```bash
+cd parent
+docker login
+
+docker buildx build --builder desktop-linux \
+  --platform linux/amd64 \
+  -f Open-Hand/containers/app/Dockerfile.local \
+  -t tuzaku95/vtnet-openhands:0.1.2 \
+  -t tuzaku95/vtnet-openhands:latest \
+  --push \
+  .
+```
+
+If the server is ARM instead, use `--platform linux/arm64` on the same command.
 
 ---
 

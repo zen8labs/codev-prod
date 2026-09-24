@@ -1,6 +1,6 @@
 # Co-review production bundle
 
-Should replace `REGISTRY=tuzaku95` with your own Docker Hub username (`tuzaku95` is my username).
+Replace `tuzaku95` with your own Docker Hub username (`tuzaku95` is my username). On Linux that value is `REGISTRY`. On Apple Silicon it is the start of each `-t` name.
 
 ## 1. Machine that contains the repo (for Zen8labs's team)
 
@@ -10,11 +10,39 @@ You need a clone of `co-review` (this `codev-prod/co-review` folder sits next to
 
 From the **co-review repo root** (not this folder). Log in to Docker Hub first. `REGISTRY` must match `COREVIEW_REGISTRY` in `.env`.
 
-The production host is **linux/amd64**. These commands publish that architecture and both tags Compose pulls: `:0.1.2` (`COREVIEW_IMAGE_TAG` in `.env.example`) and `:latest`.
-
-On Apple Silicon, turn on Docker Desktop → Settings → General → **Use Rosetta for x86/amd64 emulation on Apple Silicon**. Then build with the `desktop-linux` builder. Do **not** run `./scripts/docker-buildx-co-review.sh push` on this Mac. That script emulates amd64 with QEMU, and the dashboard `bun run build` hangs or aborts (`SIGABRT`).
+The production host is **linux/amd64**. Publish that architecture. Set `COREVIEW_IMAGE_TAG=0.1.2` on the server (the value in `.env.example`).
 
 `NEXT_PUBLIC_BASE_PATH` is a **dashboard build-arg** (Next.js `basePath`). It does not apply to PR-Agent or backup. Omit it only if the UI should live at `/`.
+
+Do **not** run these builds on the production host. After backup is on Hub, start it with `--profile backup` (see below).
+
+#### Linux (amd64)
+
+Use `scripts/docker-buildx-co-review.sh`. On this machine amd64 is native. Set `PLATFORMS=linux/amd64` so the script does not also build arm64 under QEMU.
+
+The script uploads to Docker Hub (`--push` is inside it). PR-Agent is tagged `:0.1.2` and `:latest`. Dashboard and backup take a single tag, so set `DASHBOARD_IMAGE` and `BACKUP_IMAGE` to `:0.1.2`.
+
+```bash
+cd co-review
+docker login
+./scripts/docker-buildx-co-review.sh setup
+
+REGISTRY=tuzaku95 \
+COREVIEW_IMAGE_TAG=0.1.2 \
+NEXT_PUBLIC_BASE_PATH=/co-review \
+PLATFORMS=linux/amd64 \
+DASHBOARD_IMAGE=tuzaku95/vtnet-coreview-dashboard:0.1.2 \
+BACKUP_IMAGE=tuzaku95/vtnet-coreview-backup:0.1.2 \
+  ./scripts/docker-buildx-co-review.sh push
+```
+
+After a UI change, run the same variables with `dashboard` instead of `push`. After a backup change, use `backup` instead of `push`.
+
+#### Apple Silicon
+
+Turn on Docker Desktop → Settings → General → **Use Rosetta for x86/amd64 emulation on Apple Silicon**. Build with the `desktop-linux` builder. Do **not** run `./scripts/docker-buildx-co-review.sh push` on this Mac. That script emulates amd64 with QEMU, and the dashboard `bun run build` hangs or aborts (`SIGABRT`).
+
+`--builder desktop-linux` exists only in Docker Desktop. `--push` uploads each image when the build finishes. There is no separate `docker push`.
 
 ```bash
 cd co-review
@@ -46,9 +74,7 @@ docker buildx build --builder desktop-linux --platform linux/amd64 --push \
 
 After a UI change, rerun only the Dashboard command. After a backup change, rerun only the Backup command.
 
-If the server is ARM instead, use `--platform linux/arm64` on the same three commands.
-
-Do **not** run these builds on the production host. After backup is on Hub, start it with `--profile backup` (see below).
+If the server is ARM instead, use `--platform linux/arm64` on these three commands.
 
 ---
 
