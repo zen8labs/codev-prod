@@ -13,7 +13,17 @@ parent/
 └── codev-prod/open-hand/
 ```
 
-### 1.1 Build and push images
+### 1.1 Refresh this bundle from the repo
+
+```bash
+cd codev-prod/open-hand
+./copy-from-open-hand.sh
+# or: OPEN_HAND_DIR=/path/to/Open-Hand ./copy-from-open-hand.sh
+```
+
+Fill or keep `.env` (`OPENHANDS_REGISTRY`, `OPENHANDS_IMAGE_TAG`, `SANDBOX_HOST_PORT`, `AGENT_SERVER_IMAGE_*`, `COREVIEW_WEBHOOK_PROCESSING_CALLBACK_URL`). Zip this folder yourself when you are ready to take it to the server (omit `.env` from the zip if you prefer to fill secrets only on the host). Keep `workspace/` in the zip or create it on the server.
+
+### 1.2 Build and push images
 
 From the **parent** of `Open-Hand/` and `OpenHands-SDK/` (not from inside `Open-Hand/`, not from this folder). Docker only copies files from that folder (the build context). The SDK lives next to `Open-Hand/`, so the context cannot be `Open-Hand/` itself.
 
@@ -71,17 +81,7 @@ If the server is ARM instead, use `--platform linux/arm64` on the same command.
 
 Unzip this folder. Docker Engine + Compose. The host needs the Docker socket (sandbox containers). Private Hub repos: `docker login` on this host too.
 
-### 2.1 Refresh this bundle from the repo
-
-```bash
-cd codev-prod/open-hand
-./copy-from-open-hand.sh
-# or: OPEN_HAND_DIR=/path/to/Open-Hand ./copy-from-open-hand.sh
-```
-
-Fill or keep `.env` (`OPENHANDS_REGISTRY`, `OPENHANDS_IMAGE_TAG`, `SANDBOX_HOST_PORT`, `AGENT_SERVER_IMAGE_*`, `COREVIEW_WEBHOOK_PROCESSING_CALLBACK_URL`). Zip this folder yourself when you are ready to take it to the server (omit `.env` from the zip if you prefer to fill secrets only on the host). Keep `workspace/` in the zip or create it on the server.
-
-### 2.2 Configure and start
+### 2.1 Configure and start
 
 ```bash
 mkdir -p workspace
@@ -100,6 +100,6 @@ Check:
 curl -s http://127.0.0.1:3005/api/v1/external/health
 ```
 
-### 2.3 Wire Co-review
+### 2.2 Wire Co-review
 
 On the Co-review host, set `AGENT_EXTERNAL_URL` to this Open-Hand URL (`http://<this-host>:3005`, a public URL, or `http://host.docker.internal:3005` if they share one machine). Enable the external-agent flags Co-review expects. Point `COREVIEW_WEBHOOK_PROCESSING_CALLBACK_URL` in this `.env` at Co-review PR-Agent (`http://<co-review-host>:3001/api/webhooks/processing-callback`, or `http://pr-agent-api:3001/...` only if both stacks share a Compose network).

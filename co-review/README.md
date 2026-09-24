@@ -6,7 +6,16 @@ Replace `tuzaku95` with your own Docker Hub username (`tuzaku95` is my username)
 
 You need a clone of `co-review` (this `codev-prod/co-review` folder sits next to it: `…/codev-prod/co-review` and `…/co-review`).
 
-### 1.1 Build and push images
+### 1.1 Refresh this bundle from the repo
+
+```bash
+cd codev-prod/co-review
+./copy-from-co-review.sh
+```
+
+Fill or keep `.env` (`COREVIEW_REGISTRY`, `COREVIEW_IMAGE_TAG`, SSO, DB, encryption, and `AGENT_EXTERNAL_URL` if any `*_EXTERNAL=true`). Zip this folder yourself when you are ready to take it to the server (omit `.env` from the zip if you prefer to fill secrets only on the host).
+
+### 1.2 Build and push images
 
 From the **co-review repo root** (not this folder). Log in to Docker Hub first. `REGISTRY` must match `COREVIEW_REGISTRY` in `.env`.
 
@@ -82,16 +91,7 @@ If the server is ARM instead, use `--platform linux/arm64` on these three comman
 
 Unzip this folder. Docker Engine + Compose. Private Hub repos: `docker login` on this host too.
 
-### 2.1 Refresh this bundle from the repo
-
-```bash
-cd codev-prod/co-review
-./copy-from-co-review.sh
-```
-
-Fill or keep `.env` (`COREVIEW_REGISTRY`, `COREVIEW_IMAGE_TAG`, SSO, DB, encryption, and `AGENT_EXTERNAL_URL` if any `*_EXTERNAL=true`). Zip this folder yourself when you are ready to take it to the server (omit `.env` from the zip if you prefer to fill secrets only on the host).
-
-### 2.2 Configure and start
+### 2.1 Configure and start
 
 Create `.env` **once**, then fill the keys below:
 
@@ -131,15 +131,15 @@ docker compose -f docker-compose.prod.yml --env-file .env up -d --force-recreate
 
 If host port 3000 is taken, set `CO_REVIEW_DASHBOARD_PORT` in `.env`. Compose health for the dashboard is `GET /api/health` (not `/health`, which SSO redirects).
 
-### 2.3 Login and `/co-review` base path
+### 2.2 Login and `/co-review` base path
 
-The `/co-review` prefix is **baked into the dashboard image** at build time (§1.1). You can open `http://localhost:3000/co-review/en-US` even if `.env` has no `NEXT_PUBLIC_BASE_PATH` — Next.js `basePath` does not change when the container starts.
+The `/co-review` prefix is **baked into the dashboard image** at build time (§1.2). You can open `http://localhost:3000/co-review/en-US` even if `.env` has no `NEXT_PUBLIC_BASE_PATH` — Next.js `basePath` does not change when the container starts.
 
 Still set `NEXT_PUBLIC_BASE_PATH=/co-review` in `.env` so it **matches the image**. Compose and `stack-up.sh` use that value for the health probe (`/co-review/api/health`). If it is empty, the site can work while the dashboard container looks **unhealthy**.
 
 | Place               | What to set                                                                                        |
 | ------------------- | -------------------------------------------------------------------------------------------------- |
-| Image build         | `NEXT_PUBLIC_BASE_PATH=/co-review` on the Dashboard command (see §1.1)                             |
+| Image build         | `NEXT_PUBLIC_BASE_PATH=/co-review` on the Dashboard command (see §1.2)                             |
 | `.env` (same value) | `NEXT_PUBLIC_BASE_PATH=/co-review` — healthcheck / SSO helpers; does **not** move the app          |
 | `.env`              | `DASHBOARD_PUBLIC_BASE_URL=https://your.public.host` — **origin only**, no `/co-review`            |
 | SSO IdP             | `redirect_uri` = `{origin}/co-review/auth/sso/callback`                                            |
@@ -150,7 +150,7 @@ If you built the image **without** the build-arg, the app lives at `/`. Setting 
 
 A public IdP such as `https://netmind.viettel.vn/sso-wrapper` is reachable from the dashboard container with `SSO_BASE_URL` alone. A host-only IdP at `localhost` is rewritten to `host.docker.internal` inside the container (Compose `extra_hosts`).
 
-### 2.4 Grafana embed (once, after DevLake is healthy)
+### 2.3 Grafana embed (once, after DevLake is healthy)
 
 `stack-up.sh` only **starts** DevLake and Grafana. It does not create the charts Co-review shows on **Analytics**.
 
@@ -182,9 +182,9 @@ Then recreate the dashboard so it reads `.env`:
 docker compose -f docker-compose.prod.yml --env-file .env up -d dashboard
 ```
 
-### 2.5 Backup (optional)
+### 2.4 Backup (optional)
 
-Requires Hub image `${COREVIEW_REGISTRY}/vtnet-coreview-backup:${COREVIEW_IMAGE_TAG}` (from the Backup command in §1.1).
+Requires Hub image `${COREVIEW_REGISTRY}/vtnet-coreview-backup:${COREVIEW_IMAGE_TAG}` (from the Backup command in §1.2).
 
 `--profile backup` starts **backup** and **Minio**. That is enough if Co-review Postgres is already up.
 
