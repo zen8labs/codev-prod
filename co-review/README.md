@@ -10,38 +10,45 @@ You need a clone of `co-review` (this `codev-prod/co-review` folder sits next to
 
 From the **co-review repo root** (not this folder). Log in to Docker Hub first. `REGISTRY` must match `COREVIEW_REGISTRY` in `.env`.
 
-`NEXT_PUBLIC_BASE_PATH` is a **dashboard build-arg** (Next.js `basePath`). It is ignored by `setup`, PR-Agent, and backup. Omit it only if the UI should live at `/`. For `/co-review`, set it on every command that builds the dashboard (`push` and `dashboard`).
+The production host is **linux/amd64**. These commands publish that architecture and both tags Compose pulls: `:0.1.2` (`COREVIEW_IMAGE_TAG` in `.env.example`) and `:latest`.
+
+On Apple Silicon, turn on Docker Desktop → Settings → General → **Use Rosetta for x86/amd64 emulation on Apple Silicon**. Then build with the `desktop-linux` builder. Do **not** run `./scripts/docker-buildx-co-review.sh push` on this Mac. That script emulates amd64 with QEMU, and the dashboard `bun run build` hangs or aborts (`SIGABRT`).
+
+`NEXT_PUBLIC_BASE_PATH` is a **dashboard build-arg** (Next.js `basePath`). It does not apply to PR-Agent or backup. Omit it only if the UI should live at `/`.
 
 ```bash
 cd co-review
 docker login
-./scripts/docker-buildx-co-review.sh setup
-REGISTRY=tuzaku95 NEXT_PUBLIC_BASE_PATH=/co-review ./scripts/docker-buildx-co-review.sh push
+
+# PR-Agent (API, GitHub, GitLab, Bitbucket, Azure DevOps — one image)
+docker buildx build --builder desktop-linux --platform linux/amd64 --push \
+  --target pr_agent_runtime \
+  -f pr-agent/docker/Dockerfile \
+  -t tuzaku95/vtnet-coreview-pr-agent:0.1.2 \
+  -t tuzaku95/vtnet-coreview-pr-agent:latest \
+  pr-agent
+
+# Dashboard
+docker buildx build --builder desktop-linux --platform linux/amd64 --push \
+  -f dashboard/Dockerfile \
+  --build-arg NEXT_PUBLIC_BASE_PATH=/co-review \
+  -t tuzaku95/vtnet-coreview-dashboard:0.1.2 \
+  -t tuzaku95/vtnet-coreview-dashboard:latest \
+  dashboard
+
+# Backup
+docker buildx build --builder desktop-linux --platform linux/amd64 --push \
+  -f backup/Dockerfile \
+  -t tuzaku95/vtnet-coreview-backup:0.1.2 \
+  -t tuzaku95/vtnet-coreview-backup:latest \
+  backup
 ```
 
-That script tags PR-Agent as `:latest` by default. Set `COREVIEW_IMAGE_TAG=latest` in `.env`, or retag to `0.1.2` after push.
+After a UI change, rerun only the Dashboard command. After a backup change, rerun only the Backup command.
 
-**Apple Silicon:** multi-arch `linux/amd64` emulates via QEMU. Dashboard `bun run build` often hangs or SIGABRTs. For an ARM server:
+If the server is ARM instead, use `--platform linux/arm64` on the same three commands.
 
-```bash
-REGISTRY=tuzaku95 PLATFORMS=linux/arm64 NEXT_PUBLIC_BASE_PATH=/co-review ./scripts/docker-buildx-co-review.sh push
-```
-
-Dashboard only (after a UI change):
-
-```bash
-REGISTRY=tuzaku95 PLATFORMS=linux/arm64 NEXT_PUBLIC_BASE_PATH=/co-review ./scripts/docker-buildx-co-review.sh dashboard
-```
-
-Backup only (no base path):
-
-```bash
-REGISTRY=tuzaku95 PLATFORMS=linux/arm64 ./scripts/docker-buildx-co-review.sh backup
-```
-
-Do **not** run `docker-buildx-co-review.sh` on the production host. After backup is on Hub, start it with `--profile backup` (see below).
-
-Azure DevOps webhook image is not tagged by the script; either omit that profile or retag from the API image.
+Do **not** run these builds on the production host. After backup is on Hub, start it with `--profile backup` (see below).
 
 ---
 
@@ -106,7 +113,7 @@ Still set `NEXT_PUBLIC_BASE_PATH=/co-review` in `.env` so it **matches the image
 
 | Place               | What to set                                                                                        |
 | ------------------- | -------------------------------------------------------------------------------------------------- |
-| Image build         | `NEXT_PUBLIC_BASE_PATH=/co-review` on `push` / `dashboard` (see §1.1)                              |
+| Image build         | `NEXT_PUBLIC_BASE_PATH=/co-review` on the Dashboard command (see §1.1)                             |
 | `.env` (same value) | `NEXT_PUBLIC_BASE_PATH=/co-review` — healthcheck / SSO helpers; does **not** move the app          |
 | `.env`              | `DASHBOARD_PUBLIC_BASE_URL=https://your.public.host` — **origin only**, no `/co-review`            |
 | SSO IdP             | `redirect_uri` = `{origin}/co-review/auth/sso/callback`                                            |
@@ -151,7 +158,7 @@ docker compose -f docker-compose.prod.yml --env-file .env up -d dashboard
 
 ### 2.5 Backup (optional)
 
-Requires Hub image `${COREVIEW_REGISTRY}/vtnet-coreview-backup:${COREVIEW_IMAGE_TAG}` (from `docker-buildx-co-review.sh backup` or `push`).
+Requires Hub image `${COREVIEW_REGISTRY}/vtnet-coreview-backup:${COREVIEW_IMAGE_TAG}` (from the Backup command in §1.1).
 
 `--profile backup` starts **backup** and **Minio**. That is enough if Co-review Postgres is already up.
 

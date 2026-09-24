@@ -190,7 +190,7 @@ services:
       start_period: 20s
 
   pr-agent-api:
-    image: ${COREVIEW_REGISTRY:-baotq4}/vtnet-coreview-pr-agent-api:${COREVIEW_IMAGE_TAG:-0.1.2}
+    image: ${COREVIEW_REGISTRY:-baotq4}/vtnet-coreview-pr-agent:${COREVIEW_IMAGE_TAG:-0.1.2}
     pull_policy: always
     container_name: co-review-pr-agent-api
     restart: unless-stopped
@@ -237,7 +237,7 @@ services:
     entrypoint: ["python", "-m", "pr_agent.servers.api"]
 
   pr-agent-github:
-    image: ${COREVIEW_REGISTRY:-baotq4}/vtnet-coreview-pr-agent-github:${COREVIEW_IMAGE_TAG:-0.1.2}
+    image: ${COREVIEW_REGISTRY:-baotq4}/vtnet-coreview-pr-agent:${COREVIEW_IMAGE_TAG:-0.1.2}
     pull_policy: always
     container_name: co-review-pr-agent-github
     restart: unless-stopped
@@ -267,7 +267,7 @@ services:
     entrypoint: ["python", "-m", "pr_agent.servers.github_app"]
 
   pr-agent-gitlab:
-    image: ${COREVIEW_REGISTRY:-baotq4}/vtnet-coreview-pr-agent-gitlab:${COREVIEW_IMAGE_TAG:-0.1.2}
+    image: ${COREVIEW_REGISTRY:-baotq4}/vtnet-coreview-pr-agent:${COREVIEW_IMAGE_TAG:-0.1.2}
     pull_policy: always
     container_name: co-review-pr-agent-gitlab
     restart: unless-stopped
@@ -297,7 +297,7 @@ services:
     entrypoint: ["python", "-m", "pr_agent.servers.gitlab_webhook"]
 
   pr-agent-bitbucket:
-    image: ${COREVIEW_REGISTRY:-baotq4}/vtnet-coreview-pr-agent-bitbucket:${COREVIEW_IMAGE_TAG:-0.1.2}
+    image: ${COREVIEW_REGISTRY:-baotq4}/vtnet-coreview-pr-agent:${COREVIEW_IMAGE_TAG:-0.1.2}
     pull_policy: always
     container_name: co-review-pr-agent-bitbucket
     restart: unless-stopped
@@ -328,7 +328,7 @@ services:
     entrypoint: ["python", "-m", "pr_agent.servers.bitbucket_app"]
 
   pr-agent-azuredevops:
-    image: ${COREVIEW_REGISTRY:-baotq4}/vtnet-coreview-pr-agent-azuredevops:${COREVIEW_IMAGE_TAG:-0.1.2}
+    image: ${COREVIEW_REGISTRY:-baotq4}/vtnet-coreview-pr-agent:${COREVIEW_IMAGE_TAG:-0.1.2}
     pull_policy: always
     container_name: co-review-pr-agent-azuredevops
     restart: unless-stopped
