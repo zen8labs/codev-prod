@@ -14,6 +14,7 @@ cd codev-prod/co-review
 ```
 
 Commit the changes and push to the repo.
+
 ### 1.2 Build and push images
 
 From the **co-review repo root** (not this folder). Log in to Docker Hub first. `REGISTRY` must match `COREVIEW_REGISTRY` in `.env`.

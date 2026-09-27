@@ -21,7 +21,7 @@ cd codev-prod/open-hand
 # or: OPEN_HAND_DIR=/path/to/Open-Hand ./copy-from-open-hand.sh
 ```
 
-Fill or keep `.env` (`OPENHANDS_REGISTRY`, `OPENHANDS_IMAGE_TAG`, `SANDBOX_HOST_PORT`, `AGENT_SERVER_IMAGE_*`, `COREVIEW_WEBHOOK_PROCESSING_CALLBACK_URL`). Zip this folder yourself when you are ready to take it to the server (omit `.env` from the zip if you prefer to fill secrets only on the host). Keep `workspace/` in the zip or create it on the server.
+Commit the changes and push to the repo.
 
 ### 1.2 Build and push images
 
@@ -79,12 +79,13 @@ If the server is ARM instead, use `--platform linux/arm64` on the same command.
 
 ## 2. Production machine (no git clone of the app) (for Viettel's team)
 
-Unzip this folder. Docker Engine + Compose. The host needs the Docker socket (sandbox containers). Private Hub repos: `docker login` on this host too.
-
 ### 2.1 Configure and start
 
 ```bash
 mkdir -p workspace
+
+cp -n .env.example .env
+
 # OPENHANDS_REGISTRY / OPENHANDS_IMAGE_TAG must match what you pushed
 nano .env
 
