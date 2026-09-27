@@ -6,7 +6,7 @@ Replace `tuzaku95` with your own Docker Hub username (`tuzaku95` is my username)
 
 You need a clone of `co-review` (this `codev-prod/co-review` folder sits next to it: `…/codev-prod/co-review` and `…/co-review`).
 
-### 1.1 Refresh this bundle from the repo
+### 1.1 Refresh this bundle from the repo (in `codev-prod/co-review`)
 
 ```bash
 cd codev-prod/co-review
@@ -15,7 +15,7 @@ cd codev-prod/co-review
 
 Commit the changes and push to the repo.
 
-### 1.2 Build and push images
+### 1.2 Build and push images (in `co-review`)
 
 From the **co-review repo root** (not this folder). Log in to Docker Hub first. `REGISTRY` must match `COREVIEW_REGISTRY` in `.env`.
 
