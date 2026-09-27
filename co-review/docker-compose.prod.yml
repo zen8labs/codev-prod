@@ -438,23 +438,26 @@ services:
       pr-agent-api:
         condition: service_healthy
 
-  minio:
-    image: minio/minio:latest
-    container_name: co-review-minio
+  rustfs:
+    image: rustfs/rustfs:1.0.0
+    container_name: co-review-rustfs
     restart: unless-stopped
     profiles:
       - backup
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-    command: server /data --console-address ":9001"
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY}
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_CONSOLE_ADDRESS: ":9001"
+    command: ["/data"]
     volumes:
-      - minio_data:/data
+      - rustfs_data:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/health"]
       interval: 10s
       timeout: 5s
       retries: 3
+      start_period: 20s
 
 volumes:
   postgres_data:
@@ -463,4 +466,4 @@ volumes:
   devlake_mysql_data:
   devlake_grafana_data:
   devlake_log:
-  minio_data:
+  rustfs_data:

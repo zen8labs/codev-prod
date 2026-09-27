@@ -34,4 +34,4 @@ if [[ ! -f "$DEST/.env" ]]; then
 fi
 
 echo "Copied from $SRC into $DEST"
-echo "Zip this folder yourself when ready."
+echo "Commit and push the changes to the remote repo."
