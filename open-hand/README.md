@@ -39,7 +39,9 @@ The production host is **linux/amd64**. Set `OPENHANDS_REGISTRY=tuzaku95` and `O
 
 Do **not** run this build on the production host. Do **not** push the SDK or agent-server from this repo. If `ghcr.io/oadtq/agent-server` is private, `docker login ghcr.io` on the **server** (the app pulls it through the Docker socket on first review).
 
-#### Linux (amd64)
+We have separate build scripts for amd64 and arm64 machines. Based on your machine, choose one of these two sections.
+
+#### If your build machine is Linux (amd64)
 
 amd64 is native. Build only that platform so Buildx does not also emulate arm64.
 
@@ -56,7 +58,7 @@ docker buildx build \
   .
 ```
 
-#### Apple Silicon
+#### If your build machine is Apple Silicon
 
 Turn on Docker Desktop → Settings → General → **Use Rosetta for x86/amd64 emulation on Apple Silicon**. Build with the `desktop-linux` builder so the image is still `linux/amd64` for the server. `--builder desktop-linux` exists only in Docker Desktop.
 

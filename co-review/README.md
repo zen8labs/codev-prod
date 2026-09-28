@@ -25,7 +25,9 @@ The production host is **linux/amd64**. Publish that architecture. Set `COREVIEW
 
 Do **not** run these builds on the production host. After backup is on Hub, start it with `--profile backup` (see below).
 
-#### Linux (amd64)
+We have separate build scripts for amd64 and arm64 machines. Based on your machine, choose one of these two sections.
+
+#### If your build machine is Linux (amd64)
 
 Use `scripts/docker-buildx-co-review.sh`. On this machine amd64 is native. Set `PLATFORMS=linux/amd64` so the script does not also build arm64 under QEMU.
 
@@ -47,7 +49,7 @@ BACKUP_IMAGE=tuzaku95/vtnet-coreview-backup:0.1.2 \
 
 After a UI change, run the same variables with `dashboard` instead of `push`. After a backup change, use `backup` instead of `push`.
 
-#### Apple Silicon
+#### If your build machine is Apple Silicon
 
 Turn on Docker Desktop → Settings → General → **Use Rosetta for x86/amd64 emulation on Apple Silicon**. Build with the `desktop-linux` builder. Do **not** run `./scripts/docker-buildx-co-review.sh push` on this Mac. That script emulates amd64 with QEMU, and the dashboard `bun run build` hangs or aborts (`SIGABRT`).
 
